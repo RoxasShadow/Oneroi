@@ -1,0 +1,111 @@
+#! /usr/bin/env ruby
+##########################################################################
+#    Giovanni Capuano <webmaster@giovannicapuano.net>
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+##########################################################################
+require 'oneroi'
+require 'oneroi/version'
+require 'optparse'
+
+options = {}
+OptionParser.new { |opts|
+	opts.banner = 'Usage: ruby oneroi [option] [arg]'
+	
+	opts.on '-h', '--help', 'Displays this help' do
+		puts opts
+		exit
+	end
+	opts.on '-v', '--version', 'Displays the version' do
+		puts Oneroi.version
+		exit
+	end
+	opts.on '-s ', '--host ', 'Host' do |value|
+		options[:host] = value||nil
+	end
+	opts.on '-u ', '--username ', 'Username' do |value|
+		options[:username] = value||nil
+	end
+	opts.on '-p ', '--password ', 'Password' do |value|
+		options[:password] = value||nil
+	end
+	opts.on '-i ', '--inbox ', 'Changes the path to the inbox' do |value|
+		options[:inbox] = value||nil
+	end
+	
+	#Methods
+	opts.on '--reset', 'Deletes the inbox' do
+		options[:reset] = true
+	end
+	opts.on '--fetch', 'Fetches new mails by the server', "\t*Require login" do
+		options[:fetch] = true
+	end
+	opts.on '--countremote', 'Gets how mails are in the server', "\t*Require login" do
+		options[:countremote] = true
+	end
+	opts.on '--countlocal', 'Gets how mails are in the inbox' do
+		options[:countlocal] = true
+	end
+	opts.on '--deleteremote', 'Deletes a mail in the server', "\t--deleteremote ID to delete single mails", "\t*Require login" do
+		options[:deleteremote] = true
+	end
+	opts.on '--deletelocal', 'Deletes a mail in the inbox', "\t--deletelocal ID to delete single mails" do
+		options[:deletelocal] = true
+	end
+	opts.on '--new', 'New mail in the server?', "\t*Require login" do
+		options[:new] = true
+	end
+	opts.on '--read', 'Reads all mails in the inbox', "\t--read ID to read single mails" do
+		options[:read] = true
+	end
+	opts.on '--daemonize', "It\'ll alert you when you receive new mails", "\t--daemonize MINUTES of delay", "\t*Require login" do
+		options[:daemon] = true
+	end
+}.parse!
+
+if options[:host] && options[:username] && options[:password]
+	begin
+		mailer = Oneroi.new(options[:host], options[:username], options[:password], options[:inbox]||nil)
+	rescue
+		puts 'Login failed'
+		exit
+	end
+	mailer.fetch if options[:fetch]
+	puts mailer.count_remote if options[:countremote]
+	mailer.delete_remote(ARGV[0].to_i) if options[:deleteremote]
+	puts mailer.new_mail? if options[:new]
+	if options[:daemon]
+		pid = fork do
+			loop do
+				if mailer.new_mail?
+					n = mailer.count_remote - mailer.count_local
+					if n > 1
+						system("notify-send 'New mails' 'You have #{n} new mails' -t 3000")
+					else
+						system("notify-send 'New mail' 'You have a new mail' -t 3000")
+					end
+					mailer.fetch
+					sleep(ARGV[0].to_i*60||15*60)
+				end
+			end
+		end
+		Process.detach(pid)
+	end
+end
+
+mailer = Oneroi.new(nil, nil, nil, options[:inbox]||nil)
+
+mailer.reset if options[:reset]
+mailer.delete_local(ARGV[0].to_i) if options[:deletelocal]
+puts mailer.count_local if options[:countlocal]
+p Oneroi.parse(mailer.read(ARGV[0].to_i)) if options[:read]
